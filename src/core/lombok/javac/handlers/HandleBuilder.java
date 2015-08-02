@@ -266,12 +266,15 @@ public class HandleBuilder extends JavacAnnotationHandler<Builder> {
 						idx++;
 						if (!(tOnRet instanceof JCIdent)) continue;
 						if (((JCIdent) tOnRet).name != tp.name) continue;
+						if (pos != -1) {
+							annotationNode.addError("@Builder(toBuilder=true) requires that each type parameter on the static method is part of the typeargs of the return value. Type parameter " + tp.name + " is part of the return type 2 times or more. It must show up in the return type exactly once.");
+							return;
+						}
 						pos = idx;
 					}
 					
 					if (pos == -1 || tpOnType.size() <= pos) {
-						annotationNode.addError("**" + returnType.getClass().toString());
-//						annotationNode.addError("@Builder(toBuilder=true) requires that each type parameter on the static method is part of the typeargs of the return value. Type parameter " + tp.name + " is not part of the return type.");
+						annotationNode.addError("@Builder(toBuilder=true) requires that each type parameter on the static method is part of the typeargs of the return value. Type parameter " + tp.name + " is not part of the return type.");
 						return;
 					}
 					typeArgsForToBuilder.add(tpOnType.get(pos).name);

@@ -1,0 +1,7 @@
+11 The syntax is either @ObtainVia(field = "fieldName") or @ObtainVia(method = "methodName").
+17 The syntax is either @ObtainVia(field = "fieldName") or @ObtainVia(method = "methodName").
+24 @ObtainVia(isStatic = true) is not valid unless 'method' has been set.
+28 @Builder(toBuilder=true) is only supported if you return your own type.
+35 The member type BuilderWithToBuilderInvalidUse<String>.Inner cannot be qualified with a parameterized type, since it is static. Remove arguments from qualifying type BuilderWithToBuilderInvalidUse<String>
+40 @Builder(toBuilder=true) requires that each type parameter on the static method is part of the typeargs of the return value. Type parameter V is not part of the return type.
+48 @Builder(toBuilder=true) requires that each type parameter on the static method is part of the typeargs of the return value. Type parameter Z is part of the return type 2 times or more. It must show up in the return type exactly once.

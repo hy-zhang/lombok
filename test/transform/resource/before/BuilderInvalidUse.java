@@ -17,3 +17,10 @@ class AlsoInvalid {
 
 	}
 }
+
+class Valid {
+	@lombok.Builder
+	class InvalidInner {
+		int foo;
+	}
+}

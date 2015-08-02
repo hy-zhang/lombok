@@ -1,2 +1,3 @@
 2 @Getter, @Setter, @FieldDefaults, @Wither, @Data, @ToString, @EqualsAndHashCode, @AllArgsConstructor are not allowed on builder classes.
 13 @Value is not allowed on builder classes.
+22 The member type InvalidInnerBuilder cannot be declared static; static types can only be declared in static or top level types

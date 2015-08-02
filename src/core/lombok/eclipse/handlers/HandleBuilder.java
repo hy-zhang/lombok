@@ -230,7 +230,7 @@ public class HandleBuilder extends EclipseAnnotationHandler<Builder> {
 					token = ((SingleTypeReference) md.returnType).token;
 				} else if (md.returnType instanceof QualifiedTypeReference) {
 					pkg = ((QualifiedTypeReference) md.returnType).tokens;
-					token = pkg[pkg.length];
+					token = pkg[pkg.length - 1];
 					char[][] pkg_ = new char[pkg.length - 1][];
 					System.arraycopy(pkg, 0, pkg_, 0, pkg_.length);
 					pkg = pkg_;
@@ -271,6 +271,10 @@ public class HandleBuilder extends EclipseAnnotationHandler<Builder> {
 					if (tpOnRet != null) for (int i = 0; i < tpOnRet.length; i++) {
 						if (tpOnRet[i].getClass() != SingleTypeReference.class) continue;
 						if (!Arrays.equals(((SingleTypeReference) tpOnRet[i]).token, onMethod.name)) continue;
+						if (pos != -1) {
+							annotationNode.addError("@Builder(toBuilder=true) requires that each type parameter on the static method is part of the typeargs of the return value. Type parameter " + new String(onMethod.name) + " is part of the return type 2 times or more. It must show up in the return type exactly once.");
+							return;
+						}
 						pos = i;
 					}
 					if (pos == -1 || tpOnType == null || tpOnType.length <= pos) {
