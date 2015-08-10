@@ -1,5 +1,8 @@
 package lombok.eclipse.handlers;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+
 import org.eclipse.jdt.core.compiler.CharOperation;
 import org.eclipse.jdt.core.dom.Modifier;
 import org.eclipse.jdt.internal.compiler.ast.*;
@@ -20,150 +23,140 @@ public class HandleMixin extends EclipseAnnotationHandler<Mixin> {
 	
 	int pS, pE;
 	long p;
+	EclipseNode me;
+	TypeDeclaration meDecl;
+	EclipseNode thisAnno;
+	ASTNode _ast;
+	Annotation _src;
+	Argument[] argFields;
+	ArrayList<MethodDeclaration> fields;
 	
 	@Override public void handle(AnnotationValues<Mixin> annotation, Annotation ast, EclipseNode annotationNode) {
 		pS = ast.sourceStart;
 		pE = ast.sourceEnd;
 		p = (long)pS << 32 | pE;
-		EclipseNode typeNode = annotationNode.up();
-		createOfMethod(typeNode, annotationNode, annotationNode.get(), ast);
+		me = annotationNode.up();
+		meDecl = (TypeDeclaration) me.get();
+		_ast = annotationNode.get();
+		_src = ast;
+		thisAnno = annotationNode;
+		if ((meDecl.modifiers & ClassFileConstants.AccInterface) == 0) {
+			thisAnno.addError("@Mixin is only supported on an interface.");
+			return;
+		}
+		handleMixin();
 	}
-	private void createOfMethod(EclipseNode typeNode, EclipseNode error, ASTNode ast, Annotation src) {
-		TypeDeclaration typeDecl = (TypeDeclaration) typeNode.get();
-		MethodDeclaration of = new MethodDeclaration(typeDecl.compilationResult);
+	private void handleMixin() {
+		// Check if a method is static. Has no type parameters.
+		fields = new ArrayList<MethodDeclaration>();
+		for (EclipseNode x : me.down()) {
+			if (!(x.get() instanceof MethodDeclaration)) continue;
+			MethodDeclaration y = (MethodDeclaration) x.get();
+			if (y.isDefaultMethod()) continue;
+			if (!(y.returnType instanceof SingleTypeReference)) continue;
+			if (!Arrays.equals(TypeConstants.VOID, ((SingleTypeReference) y.returnType).token)) {
+				if (y.arguments != null && y.arguments.length != 0) continue;
+				fields.add(y);
+			}
+		}
+		// Check if a field has its setter correspondingly.
+		argFields = new Argument[fields.size()];		
+		for (int i = 0; i < fields.size(); i++) {
+			MethodDeclaration elem = fields.get(i);
+			argFields[i] = new Argument(elem.selector, p, copyType(elem.returnType), Modifier.NONE);
+		}
+		createOfMethod();
+	}
+	@SuppressWarnings("unused") private void print(String s) {
+		MethodDeclaration print = new MethodDeclaration(meDecl.compilationResult);
+		print.annotations = null;
+		print.modifiers = ClassFileConstants.AccStatic;
+		print.typeParameters = null;
+		print.returnType = new SingleTypeReference(TypeBinding.VOID.simpleName, p);
+		print.selector = "print".toCharArray();
+		print.arguments = null;
+		print.binding = null;
+		print.thrownExceptions = null;
+		print.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
+		MessageSend printInfo = new MessageSend();
+		printInfo.arguments = new Expression[] {
+				new StringLiteral(s.toCharArray(), _ast.sourceStart, _ast.sourceEnd, 0)
+		};
+		printInfo.receiver = createNameReference("System.out", _src);
+		printInfo.selector = "println".toCharArray();
+		print.statements = new Statement[] { printInfo };
+		injectMethod(me, print);
+	}
+	private void createOfMethod() {
+		MethodDeclaration of = new MethodDeclaration(meDecl.compilationResult);
 		of.annotations = null;
 		of.modifiers = ClassFileConstants.AccStatic;
 		of.typeParameters = null;
-		of.returnType = new SingleTypeReference("Point".toCharArray(), p);
+		of.returnType = new SingleTypeReference(meDecl.name, p);
 		of.selector = "of".toCharArray();
-		of.arguments = genOfArgs(p);
+		of.arguments = argFields.length == 0 ? null : argFields;
 		of.binding = null;
 		of.thrownExceptions = null;
 		of.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
-		of.bodyStart = of.declarationSourceStart = of.sourceStart = ast.sourceStart;
-		of.bodyEnd = of.declarationSourceEnd = of.sourceEnd = ast.sourceEnd;
-		TypeDeclaration anonymous = genAnonymous(typeDecl, src, ast);
+		of.bodyStart = of.declarationSourceStart = of.sourceStart = _ast.sourceStart;
+		of.bodyEnd = of.declarationSourceEnd = of.sourceEnd = _ast.sourceEnd;
+		TypeDeclaration anonymous = genAnonymous();
 		QualifiedAllocationExpression alloc = new QualifiedAllocationExpression(anonymous);
 		alloc.type = copyType(of.returnType);
 		ReturnStatement returnStmt = new ReturnStatement(alloc, pS, pE);
 		of.statements = new Statement[] { returnStmt };
-		injectMethod(typeNode, of);
+		injectMethod(me, of);
 	}
-	private Argument[] genOfArgs(long p) {
-		TypeReference intType = new SingleTypeReference(TypeBinding.INT.simpleName, p);
-		Argument x = new Argument("x".toCharArray(), p, intType, Modifier.NONE);
-		Argument y = new Argument("y".toCharArray(), p, intType, Modifier.NONE);
-		return new Argument[]{ x, y };
-	}
-	private TypeDeclaration genAnonymous(TypeDeclaration typeDecl, Annotation src, ASTNode ast) {
-		TypeDeclaration anonymous = new TypeDeclaration(typeDecl.compilationResult);
+	private TypeDeclaration genAnonymous() {
+		FieldDeclaration[] of_fields = new FieldDeclaration[fields.size()];
+		MethodDeclaration[] of_methods = new MethodDeclaration[2 * fields.size()];
+		for (int i = 0; i < fields.size(); i++) {
+			MethodDeclaration elem = fields.get(i);
+			Argument arg = new Argument(elem.selector, p, copyType(elem.returnType), Modifier.NONE);
+			FieldDeclaration f = new FieldDeclaration(("_" + String.valueOf(arg.name)).toCharArray(), pS, pE);
+			f.bits |= Eclipse.ECLIPSE_DO_NOT_TOUCH_FLAG;
+			f.modifiers = ClassFileConstants.AccDefault;
+			f.type = copyType(arg.type);
+			f.initialization = new SingleNameReference(arg.name, p);
+			of_fields[i] = f;
+			MethodDeclaration mSetter = new MethodDeclaration(meDecl.compilationResult);
+			mSetter.annotations = null;
+			mSetter.modifiers = ClassFileConstants.AccPublic;
+			mSetter.typeParameters = null;
+			mSetter.returnType = new SingleTypeReference(TypeBinding.VOID.simpleName, p);
+			mSetter.selector = arg.name;
+			mSetter.arguments = new Argument[]{ arg };
+			mSetter.binding = null;
+			mSetter.thrownExceptions = null;
+			mSetter.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
+			mSetter.bodyStart = mSetter.declarationSourceStart = mSetter.sourceStart = _ast.sourceStart;
+			mSetter.bodyEnd = mSetter.declarationSourceEnd = mSetter.sourceEnd = _ast.sourceEnd;
+			Assignment assignS = new Assignment(new SingleNameReference(("_" + String.valueOf(arg.name)).toCharArray(), p), new SingleNameReference(arg.name, p), (int)p);
+			assignS.sourceStart = pS; assignS.sourceEnd = assignS.statementEnd = pE;
+			mSetter.statements = new Statement[] { assignS };
+			of_methods[2 * i] = mSetter;
+			MethodDeclaration mGetter = new MethodDeclaration(meDecl.compilationResult);
+			mGetter.annotations = null;
+			mGetter.modifiers = ClassFileConstants.AccPublic;
+			mGetter.typeParameters = null;
+			mGetter.returnType = copyType(arg.type);
+			mGetter.selector = arg.name;
+			mGetter.arguments = null;
+			mGetter.binding = null;
+			mGetter.thrownExceptions = null;
+			mGetter.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
+			mGetter.bodyStart = mGetter.declarationSourceStart = mGetter.sourceStart = _ast.sourceStart;
+			mGetter.bodyEnd = mGetter.declarationSourceEnd = mGetter.sourceEnd = _ast.sourceEnd;
+			ReturnStatement returnS = new ReturnStatement(new SingleNameReference(("_" + String.valueOf(arg.name)).toCharArray(), p), pS, pE);
+			mGetter.statements = new Statement[] { returnS };
+			of_methods[2 * i + 1] = mGetter;
+		}
+		TypeDeclaration anonymous = new TypeDeclaration(meDecl.compilationResult);
 		anonymous.bits |= (ASTNode.IsAnonymousType | ASTNode.IsLocalType);
 		anonymous.name = CharOperation.NO_CHAR;
 		anonymous.typeParameters = null;
-		anonymous.fields = genFields();
-		anonymous.methods = genMethods(typeDecl, ast);
-		anonymous.superInterfaces = new TypeReference[]{new SingleTypeReference("Point".toCharArray(), p)};
+		anonymous.fields = of_fields.length == 0 ? null : of_fields;
+		anonymous.methods = of_methods.length == 0 ? null : of_methods;
 		return anonymous;
-	}
-	private FieldDeclaration[] genFields() {
-		FieldDeclaration _x = new FieldDeclaration("_x".toCharArray(), pS, pE);
-		_x.bits |= Eclipse.ECLIPSE_DO_NOT_TOUCH_FLAG;
-		_x.modifiers = ClassFileConstants.AccDefault;
-		_x.type = new SingleTypeReference(TypeBinding.INT.simpleName, p);
-		_x.initialization = new SingleNameReference("x".toCharArray(), p);
-		FieldDeclaration _y = new FieldDeclaration("_y".toCharArray(), pS, pE);
-		_y.bits |= Eclipse.ECLIPSE_DO_NOT_TOUCH_FLAG;
-		_y.modifiers = ClassFileConstants.AccDefault;
-		_y.type = new SingleTypeReference(TypeBinding.INT.simpleName, p);
-		_y.initialization = new SingleNameReference("y".toCharArray(), p);
-		return new FieldDeclaration[]{ _x, _y };
-	}
-	private MethodDeclaration[] genMethods(TypeDeclaration typeDecl, ASTNode ast) {
-		MethodDeclaration intX = new MethodDeclaration(typeDecl.compilationResult);
-		intX.annotations = null;
-		intX.modifiers = ClassFileConstants.AccPublic;
-		intX.typeParameters = null;
-		intX.returnType = new SingleTypeReference(TypeBinding.INT.simpleName, p);
-		intX.selector = "x".toCharArray();
-		intX.arguments = null;
-		intX.binding = null;
-		intX.thrownExceptions = null;
-		intX.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
-		intX.bodyStart = intX.declarationSourceStart = intX.sourceStart = ast.sourceStart;
-		intX.bodyEnd = intX.declarationSourceEnd = intX.sourceEnd = ast.sourceEnd;
-		ReturnStatement return_intX = new ReturnStatement(new SingleNameReference("_x".toCharArray(), p), pS, pE);
-		intX.statements = new Statement[] { return_intX };
-		MethodDeclaration intY = new MethodDeclaration(typeDecl.compilationResult);
-		intY.annotations = null;
-		intY.modifiers = ClassFileConstants.AccPublic;
-		intY.typeParameters = null;
-		intY.returnType = new SingleTypeReference(TypeBinding.INT.simpleName, p);
-		intY.selector = "y".toCharArray();
-		intY.arguments = null;
-		intY.binding = null;
-		intY.thrownExceptions = null;
-		intY.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
-		intY.bodyStart = intY.declarationSourceStart = intY.sourceStart = ast.sourceStart;
-		intY.bodyEnd = intY.declarationSourceEnd = intY.sourceEnd = ast.sourceEnd;
-		ReturnStatement return_intY = new ReturnStatement(new SingleNameReference("_y".toCharArray(), p), pS, pE);
-		intY.statements = new Statement[] { return_intY };
-		MethodDeclaration voidX = new MethodDeclaration(typeDecl.compilationResult);
-		voidX.annotations = null;
-		voidX.modifiers = ClassFileConstants.AccPublic;
-		voidX.typeParameters = null;
-		voidX.returnType = new SingleTypeReference(TypeBinding.VOID.simpleName, p);
-		voidX.selector = "x".toCharArray();
-		Argument paramX = new Argument("x".toCharArray(), p, new SingleTypeReference(TypeBinding.INT.simpleName, p), Modifier.NONE);
-		paramX.sourceStart = pS; paramX.sourceEnd = pE;
-		voidX.arguments = new Argument[]{ paramX };
-		voidX.binding = null;
-		voidX.thrownExceptions = null;
-		voidX.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
-		voidX.bodyStart = voidX.declarationSourceStart = voidX.sourceStart = ast.sourceStart;
-		voidX.bodyEnd = voidX.declarationSourceEnd = voidX.sourceEnd = ast.sourceEnd;
-		Assignment assign_voidX = new Assignment(new SingleNameReference("_x".toCharArray(), p), new SingleNameReference("x".toCharArray(), p), (int)p);
-		assign_voidX.sourceStart = pS; assign_voidX.sourceEnd = assign_voidX.statementEnd = pE;
-		voidX.statements = new Statement[] { assign_voidX };
-		MethodDeclaration voidY = new MethodDeclaration(typeDecl.compilationResult);
-		voidY.annotations = null;
-		voidY.modifiers = ClassFileConstants.AccPublic;
-		voidY.typeParameters = null;
-		voidY.returnType = new SingleTypeReference(TypeBinding.VOID.simpleName, p);
-		voidY.selector = "y".toCharArray();
-		Argument paramY = new Argument("y".toCharArray(), p, new SingleTypeReference(TypeBinding.INT.simpleName, p), Modifier.NONE);
-		paramY.sourceStart = pS; paramY.sourceEnd = pE;
-		voidY.arguments = new Argument[]{ paramY };
-		voidY.binding = null;
-		voidY.thrownExceptions = null;
-		voidY.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
-		voidY.bodyStart = voidY.declarationSourceStart = voidY.sourceStart = ast.sourceStart;
-		voidY.bodyEnd = voidY.declarationSourceEnd = voidY.sourceEnd = ast.sourceEnd;
-		Assignment assign_voidY = new Assignment(new SingleNameReference("_y".toCharArray(), p), new SingleNameReference("y".toCharArray(), p), (int)p);
-		assign_voidY.sourceStart = pS; assign_voidY.sourceEnd = assign_voidY.statementEnd = pE;
-		voidY.statements = new Statement[] { assign_voidY };
-		MethodDeclaration withX = new MethodDeclaration(typeDecl.compilationResult);
-		withX.annotations = null;
-		withX.modifiers = ClassFileConstants.AccPublic;
-		withX.typeParameters = null;
-		withX.returnType = new SingleTypeReference("Point".toCharArray(), p);
-		withX.selector = "withX".toCharArray();
-		Argument param_withX = new Argument("x".toCharArray(), p, new SingleTypeReference(TypeBinding.INT.simpleName, p), Modifier.NONE);
-		param_withX.sourceStart = pS; param_withX.sourceEnd = pE;
-		withX.arguments = new Argument[]{ param_withX };
-		withX.binding = null;
-		withX.thrownExceptions = null;
-		withX.bits |= ECLIPSE_DO_NOT_TOUCH_FLAG;
-		withX.bodyStart = withX.declarationSourceStart = withX.sourceStart = ast.sourceStart;
-		withX.bodyEnd = withX.declarationSourceEnd = withX.sourceEnd = ast.sourceEnd;
-		MessageSend callY = new MessageSend();
-		callY.receiver = new ThisReference(pS, pE);
-		callY.selector = "y".toCharArray();
-		MessageSend callOf = new MessageSend();
-		callOf.receiver = new SingleNameReference("Point".toCharArray(), p);
-		callOf.selector = "of".toCharArray();
-		callOf.arguments = new Expression[]{ new SingleNameReference("x".toCharArray(), p), callY };
-		ReturnStatement return_withX = new ReturnStatement(callOf, pS, pE);
-		withX.statements = new Statement[] { return_withX };
-		return new MethodDeclaration[]{ intX, intY, voidX, voidY, withX };
 	}
 }
